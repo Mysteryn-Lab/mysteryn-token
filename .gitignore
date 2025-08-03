@@ -1,0 +1,9 @@
+**/target/
+*.ffs_db
+
+**/.DS_Store
+.direnv
+
+dist
+bundle
+lib

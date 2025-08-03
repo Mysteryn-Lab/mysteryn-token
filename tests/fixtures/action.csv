@@ -1,0 +1,49 @@
+required,provided,pass
+# Equal level,,
+edit,edit,yes
+post/draft,post/draft,yes
+edit,post,no
+post/draft,post/publish,no
+post/publish,post/draft,no
+,,
+# Provided greater level,,
+post/draft,post,yes
+edit/profile/name,edit,yes
+edit/profile/name,edit/profile,yes
+edit/profile,post,no
+edit/profile/name,edit/account/name,no
+,,
+# Provided less level,,
+edit,edit/profile,no
+edit,edit/profile/name,no
+edit/profile,edit/profile/name,no
+edit/profile,edit/account/name,no
+,,
+# Wildcard,,
+*,*,yes
+*,edit,yes
+*,post,yes
+*,post/draft,no
+*/draft,post/draft,yes
+post/*,post,yes
+post/*,post/draft,yes
+edit/*,post/draft,no
+post,post/*,no
+post/draft,*,yes
+post/draft,post/*,yes
+edit/*/name,edit/profile/name,yes
+edit/*/address,edit/*/name,no
+edit/pr*le/name,edit/profile/name,no
+edit/profile/name,edit/pr*le/name,no
+,,
+# Trailing slash,,
+post/draft/,post/draft,yes
+post/draft,post/draft/,yes
+,,
+# Errors,,
+,post,no
+post,,no
+/,post,no
+post,/,no
+post//draft,post/draft,no
+post/draft,post//draft,no

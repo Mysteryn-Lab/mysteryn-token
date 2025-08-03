@@ -1,0 +1,19 @@
+[target.wasm32-unknown-unknown]
+runner = 'wasm-bindgen-test-runner'
+# This is needed so that rand can be included in wasm32-unknown-unknown builds.
+rustflags = ["--cfg", "getrandom_backend=\"wasm_js\""]
+
+#[target.wasm32-wasip1]
+#runner = 'wasmedge --dir .:. --enable-jit'
+#rustflags = ["--cfg", "wasmedge", "--cfg", "tokio_unstable"]
+
+[target.wasm32-wasip2]
+runner = 'wasmtime'
+rustflags = ["--cfg", "wasmtime", "--cfg", "tokio_unstable"]
+
+[profile.release]
+strip = "symbols"
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
