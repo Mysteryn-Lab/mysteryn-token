@@ -1,9 +1,7 @@
 [package]
 name = "mysteryn-token"
 description = "The Delegable Web Token"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.85"
+version = "0.1.1"
 keywords = ["authorization", "dwt", "capability", "security"]
 categories = [
   "authentication",
@@ -14,12 +12,14 @@ homepage = "https://mysteryn.com"
 repository = "https://github.com/Mysteryn-Lab/mysteryn-token"
 license = "MIT"
 readme = "README.md"
+edition = "2024"
+rust-version = "1.85"
 autoexamples = false
 
 # Starting from Rust 1.87 all wasm features are on, so need to specify 
 # wasm-opt features explicitly.
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-Oz", "--enable-mutable-globals", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
+wasm-opt = ["-Oz", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
 
 [dependencies]
 async-recursion = "1.0"
@@ -27,13 +27,13 @@ async-trait = "0.1"
 base64 = "0.22"
 bs58 = "0.5"
 cid = { version = "0.11", features = ["serde"] }
-libipld-core = { version = "0.16", features = ["serde-codec", "serde"] }
-libipld-json = "0.16"
+ipld-core = { version = "0.4", features = ["serde"] }
 multihash-codetable = { version = "0.1", features = ["sha2", "blake3"] }
 rand = "0.9"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_ipld_dagcbor = "0.6"
+serde_ipld_dagjson = "0.2"
 serde_bytes = "0.11"
 lru = "0.16"
 tinytemplate = "1.2"

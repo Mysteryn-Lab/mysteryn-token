@@ -1,10 +1,8 @@
 use base64::Engine;
-use libipld_core::{
-    codec::{Decode, Encode},
+use ipld_core::{
     ipld::Ipld,
     serde::{from_ipld, to_ipld},
 };
-use libipld_json::DagJsonCodec;
 use mysteryn_crypto::result::{Error, Result};
 use serde::{Serialize, Serializer, de::DeserializeOwned};
 use std::io::Cursor;
@@ -26,7 +24,7 @@ pub trait DagJson: Serialize + DeserializeOwned {
         let ipld = to_ipld(self).map_err(|e| Error::IOError(e.to_string()))?;
         let mut json_bytes = Vec::new();
 
-        ipld.encode(DagJsonCodec, &mut json_bytes)
+        serde_ipld_dagjson::to_writer(&mut json_bytes, &ipld)
             .map_err(|e| Error::IOError(e.to_string()))?;
 
         Ok(json_bytes)
@@ -34,7 +32,7 @@ pub trait DagJson: Serialize + DeserializeOwned {
 
     /// Decode from DAG-JSON bytes
     fn from_dag_json(json_bytes: &[u8]) -> Result<Self> {
-        let ipld = Ipld::decode(DagJsonCodec, &mut Cursor::new(json_bytes))
+        let ipld: Ipld = serde_ipld_dagjson::from_reader(&mut Cursor::new(json_bytes))
             .map_err(|e| Error::EncodingError(e.to_string()))?;
         from_ipld(ipld).map_err(|e| Error::EncodingError(e.to_string()))
     }

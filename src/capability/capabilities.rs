@@ -126,7 +126,7 @@ impl Capabilities {
     ///   Capability::from(("mailto:username@example.com", "msg/send")),
     /// ]);
     /// ```
-    pub fn iter(&self) -> CapabilitiesIterator {
+    pub fn iter(&self) -> CapabilitiesIterator<'_> {
         self.0.iter().flat_map(|(resource, actions)| {
             actions
                 .iter()
