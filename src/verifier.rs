@@ -207,18 +207,24 @@ impl<S: DwtStore + Clone, A: Attenuator, KF: KeyFactory> Verifier<S, A, KF> {
         if let Some(required_data) = &requirements.data {
             for required_field in required_data {
                 let Some(v) = data.get(required_field) else {
-                    return Err(Error::InvalidToken(format!(
-                        r#"no data "{required_field}""#,
+                    return Err(Error::InvalidToken(concat_string!(
+                        r#"no data ""#,
+                        required_field,
+                        r#"""#
                     )));
                 };
                 if v.is_null() {
-                    return Err(Error::InvalidToken(format!(
-                        r#"no data "{required_field}""#,
+                    return Err(Error::InvalidToken(concat_string!(
+                        r#"no data ""#,
+                        required_field,
+                        r#"""#
                     )));
                 }
                 if v.is_string() && v.as_str().unwrap_or_default().trim().is_empty() {
-                    return Err(Error::InvalidToken(format!(
-                        r#"no data "{required_field}""#,
+                    return Err(Error::InvalidToken(concat_string!(
+                        r#"no data ""#,
+                        required_field,
+                        r#"""#
                     )));
                 }
             }
@@ -253,8 +259,12 @@ impl<S: DwtStore + Clone, A: Attenuator, KF: KeyFactory> Verifier<S, A, KF> {
                 let cap = Capability::new(resource.clone(), ability.clone());
                 let view = semantics.parse_capability(&cap);
                 let Some(view) = view else {
-                    return Err(Error::InvalidToken(format!(
-                        r#"no capability "{resource} {ability}""#
+                    return Err(Error::InvalidToken(concat_string!(
+                        r#"no capability ""#,
+                        resource,
+                        " ",
+                        ability,
+                        r#"""#
                     )));
                 };
                 if let Some(attenuation) = view.attenuation.as_ref() {
@@ -264,8 +274,12 @@ impl<S: DwtStore + Clone, A: Attenuator, KF: KeyFactory> Verifier<S, A, KF> {
                         attenuation,
                         chain.token(),
                     ) {
-                        return Err(Error::InvalidToken(format!(
-                            r#"no capability (attenuated) "{resource} {ability}""#
+                        return Err(Error::InvalidToken(concat_string!(
+                            r#"no capability (attenuated) ""#,
+                            resource,
+                            " ",
+                            ability,
+                            r#"""#
                         )));
                     }
                 }
@@ -278,8 +292,12 @@ impl<S: DwtStore + Clone, A: Attenuator, KF: KeyFactory> Verifier<S, A, KF> {
                     }
                 }
                 if !found {
-                    return Err(Error::InvalidToken(format!(
-                        r#"no capability "{resource} {ability}""#
+                    return Err(Error::InvalidToken(concat_string!(
+                        r#"no capability ""#,
+                        resource,
+                        " ",
+                        ability,
+                        r#"""#
                     )));
                 }
             }
@@ -379,12 +397,12 @@ mod tests {
     type Token = MultiToken<DefaultKeyFactory>;
 
     // get it with "token/generate_keys()"
-    const SECRET1: &str = "secret_xahgjgqfsxwdjkxun9wspqzgzve7sze7vwm0kszkya5lurz4np9cmc8k4frds9ze0g6kzsky8pmv8qxur4vfupul38mfdgrcc";
-    //const PUBLIC1: &str = "pub_xahgjw6qgrwp6kyqgpypch74uwu40vns89yhzppvxjket5wf63tty0ar3nexl5l797l2q40ypevtls9aprku";
-    const SECRET2: &str = "secret_xahgjgqfsxwdjkxun9wspqzgr376fxzzk8jms55m6gkxa3dmtkyzmm6wfajarmv37qrf4gkqjg0g8qxur4v2gsj5skasefdpg";
-    //const PUBLIC2: &str = "pub_xahgjw6qgrwp6kyqgpyq29vthlflt6dtl5pvlrwrnllgyy5ws5a0w3xa2tt0425k9rvcwus9j33c3u0m7a2v";
-    const SECRET3: &str = "secret_xahgjgqfsxwdjkxun9wspqzgrn0pkqhum8l2tmqkgv6hwsxz7hdhdhptwk5h603d6ylrym6hqs558qxur4vfhwa808gw29q6g";
-    //const PUBLIC3: &str = "pub_xahgjw6qgrwp6kyqgpypytg3jyl048vrnfvngk6wpz40pnhy4248gfx2guhwfczwm5mqywvctvd3e3pzlxyq";
+    const SECRET1: &str = "secret_xahgjgqfsxwdjkxun9wspqzgqgrsd09u5cxjmy5cflrpxg25xu9dss95d8dtzg6ypkvfyqyejuyc8qxur4vgmckmc6mdanv";
+    //const PUBLIC1: &str = "pub_xahgjw6qgrwp6kyqgpyrscgnh35hkuxlspvetq2vpkyxvyse3c95xqzjk4egcudvvn3pxpg7s0h0hw0r4d";
+    const SECRET2: &str = "secret_xahgjgqfsxwdjkxun9wspqzgqv4nswyr97hz886lz0082w4fwzdkdehu9n4pccfs6rhp06e2cegs8qxur4vgt8f50u23fyy";
+    //const PUBLIC2: &str = "pub_xahgjw6qgrwp6kyqgpyqjz2yeysrw28ln890d0suxpv5y8ypyp7jhgcm0hrcnrfpghswp3rsw6mjejzjy2";
+    const SECRET3: &str = "secret_xahgjgqfsxwdjkxun9wspqzgxr6f7lyrdqvlqcafxgcafrsq7nkh2sc5kcjasw2lnhzefrtnljys8qxur4vteglcajecxh6";
+    //const PUBLIC3: &str = "pub_xahgjw6qgrwp6kyqgpypny3wzj2af4svfd3wx0sf8m03jza9n6a23vvdwx82q30fsaqgskh5zadarmjkea";
 
     async fn build_proof() -> Result<Token> {
         let secret_key = SecretKey::from_str(SECRET1).unwrap();
@@ -499,9 +517,9 @@ mod tests {
         let server_secret = SecretKey::from_str(SECRET1).unwrap();
         let alice_secret = SecretKey::from_str(SECRET2).unwrap();
         let bob_secret = SecretKey::from_str(SECRET3).unwrap();
-        let server_did = server_secret.get_did_pkh("joy", Some("joy")).unwrap();
-        let alice_did = alice_secret.get_did_pkh("joy", Some("joy")).unwrap();
-        let bob_did = bob_secret.get_did_pkh("joy", Some("joy")).unwrap();
+        let server_did = server_secret.get_did_pkh("joy", "joy").unwrap();
+        let alice_did = alice_secret.get_did_pkh("joy", "joy").unwrap();
+        let bob_did = bob_secret.get_did_pkh("joy", "joy").unwrap();
         println!("Server DID: {server_did}");
         println!("Alice DID: {alice_did}");
         println!("Bob DID: {bob_did}");

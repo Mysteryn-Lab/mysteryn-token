@@ -1,5 +1,12 @@
 use crate::token::{DELEGABLE_WEB_TOKEN_TYPE, Token};
-use ciborium::value::Value;
+use cbor4ii::core::{
+    Value,
+    dec::Decode,
+    enc::Encode,
+    error::Len,
+    types,
+    utils::{BufWriter, SliceReader},
+};
 use mysteryn_crypto::{
     key_traits::{KeyFactory, SignatureTrait},
     result::{Error, Result},
@@ -24,138 +31,99 @@ pub struct Header {
 impl<KF: KeyFactory> From<&Token<KF>> for Header {
     fn from(token: &Token<KF>) -> Self {
         Self {
-            alg: token.sig.algorithm_name().to_string(),
-            typ: DELEGABLE_WEB_TOKEN_TYPE.to_string(),
+            alg: token.sig.algorithm_name().into(),
+            typ: DELEGABLE_WEB_TOKEN_TYPE.into(),
         }
     }
 }
 
 pub fn encode(header: &[u8], payload: &[u8], signature: &[u8]) -> Result<Vec<u8>> {
+    // Pre‑allocate a buffer that is large enough for most tokens.
+    let mut buf = BufWriter::new(Vec::with_capacity(payload.len() + signature.len() + 64));
     let value = Value::Tag(
         SIG1_TAG,
         Box::new(Value::Array(vec![
-            Value::Bytes(header.to_vec()),
+            Value::Bytes(header.to_owned()),
             Value::Map(vec![(
                 Value::Text("typ".to_owned()),
                 Value::Text(DELEGABLE_WEB_TOKEN_TYPE.to_owned()),
             )]),
-            Value::Bytes(payload.to_vec()),
-            Value::Bytes(signature.to_vec()),
+            Value::Bytes(payload.to_owned()),
+            Value::Bytes(signature.to_owned()),
         ])),
     );
-    let mut v = vec![];
-    ciborium::into_writer(&value, &mut v).map_err(|e| Error::EncodingError(e.to_string()))?;
-    Ok(v)
+
+    value
+        .encode(&mut buf)
+        .map_err(|e| Error::EncodingError(e.to_string()))?;
+    Ok(buf.buffer().to_vec())
 }
 
 pub fn is_cwt(token: &[u8]) -> bool {
-    let mut buf = token;
-    let Ok(tag) = ciborium::from_reader(&mut buf) else {
+    let mut reader: SliceReader<'_> = SliceReader::new(token);
+    let Ok(tag) = types::Tag::tag(&mut reader) else {
         return false;
     };
-    match tag {
-        ciborium::value::Value::Tag(tag, _) => tag == CWT_TAG || tag == SIG1_TAG,
-        _ => false,
-    }
+    tag == CWT_TAG || tag == SIG1_TAG
 }
 
 pub fn decode(token: &[u8]) -> Result<CborTokenTuple> {
     cbor_decode(token).map_err(|e| Error::EncodingError(e.to_string()))
 }
 
+// Helper that extracts the inner SIG1_TAG array.
+fn expect_sig1_array(
+    reader: &mut SliceReader<'_>,
+) -> std::result::Result<CborTokenTuple, cbor4ii::core::error::DecodeError<std::convert::Infallible>>
+{
+    let len = types::Array::len(reader)?;
+    let Some(len) = len else {
+        return Err(cbor4ii::core::error::DecodeError::RequireLength {
+            name: &"SIG1_TAG:array",
+            found: Len::Small(0_u16),
+        });
+    };
+    if len < 4 {
+        return Err(cbor4ii::core::error::DecodeError::RequireLength {
+            name: &"SIG1_TAG:array",
+            found: Len::Small(len.try_into().unwrap_or_default()),
+        });
+    }
+    let a = <types::Bytes<&[u8]>>::decode(reader)?.0.to_vec();
+    let _ = Value::decode(reader)?; // skip unprotected header map
+    let b = <types::Bytes<&[u8]>>::decode(reader)?.0.to_vec();
+    let c = <types::Bytes<&[u8]>>::decode(reader)?.0.to_vec();
+    Ok((a, b, c))
+}
+
 fn cbor_decode(
     token: &[u8],
-) -> std::result::Result<CborTokenTuple, ciborium::de::Error<std::io::Error>> {
-    let mut buf = token;
-    let tag: ciborium::value::Value = ciborium::from_reader(&mut buf)?;
-    let arr = match tag {
-        ciborium::value::Value::Tag(tag, v) => {
-            if tag == SIG1_TAG {
-                if v.is_array() {
-                    v.into_array()
-                        .map_err(|_| std::io::Error::other("failed to parse SIG1_TAG: array"))?
-                } else {
-                    return Err(ciborium::de::Error::Semantic(
-                        None,
-                        "expected SIG1_TAG: array".to_owned(),
-                    ));
-                }
-            } else if tag == CWT_TAG {
-                match *v {
-                    ciborium::value::Value::Tag(tag, v) => {
-                        if tag == SIG1_TAG {
-                            if v.is_array() {
-                                v.into_array().map_err(|_| {
-                                    std::io::Error::other("failed to parse SIG1_TAG: array")
-                                })?
-                            } else {
-                                return Err(ciborium::de::Error::Semantic(
-                                    None,
-                                    "expected CWT > SIG1_TAG:array".to_owned(),
-                                ));
-                            }
-                        } else {
-                            return Err(ciborium::de::Error::Semantic(
-                                None,
-                                "expected CWT > SIG1_TAG:array".to_owned(),
-                            ));
-                        }
-                    }
-                    _ => {
-                        return Err(ciborium::de::Error::Semantic(
-                            None,
-                            "expected CWT > SIG1_TAG:array".to_owned(),
-                        ));
-                    }
-                }
+) -> std::result::Result<CborTokenTuple, cbor4ii::core::error::DecodeError<std::convert::Infallible>>
+{
+    let mut reader: SliceReader<'_> = SliceReader::new(token);
+
+    // The outermost value must be a tag (either SIG1_TAG or CWT_TAG).
+    let tag = types::Tag::tag(&mut reader)?;
+
+    match tag {
+        SIG1_TAG => expect_sig1_array(&mut reader),
+        CWT_TAG => {
+            // CWT ::= Tag(SIG1_TAG, array)
+            let inner_tag = types::Tag::tag(&mut reader)?;
+            if inner_tag == SIG1_TAG {
+                expect_sig1_array(&mut reader)
             } else {
-                return Err(ciborium::de::Error::Semantic(
-                    None,
-                    "expected CWT or SIG1_TAG:array".to_owned(),
-                ));
+                Err(cbor4ii::core::error::DecodeError::Mismatch {
+                    name: &"SIG1_TAG:array",
+                    found: 0,
+                })
             }
         }
-        _ => {
-            return Err(ciborium::de::Error::Semantic(
-                None,
-                "expected CWT or SIG1_TAG:array".to_owned(),
-            ));
-        }
-    };
-    if arr.len() < 4 {
-        return Err(ciborium::de::Error::Semantic(
-            None,
-            "expected SIG1_TAG:array of size 4".to_owned(),
-        ));
+        _ => Err(cbor4ii::core::error::DecodeError::Mismatch {
+            name: &"SIG1_TAG:array",
+            found: 0,
+        }),
     }
-    let header = match &arr[0] {
-        ciborium::value::Value::Bytes(v) => v.clone(),
-        _ => {
-            return Err(ciborium::de::Error::Semantic(
-                None,
-                "expected SIG1_TAG:array header as bytes".to_owned(),
-            ));
-        }
-    };
-    let payload = match &arr[2] {
-        ciborium::value::Value::Bytes(v) => v.clone(),
-        _ => {
-            return Err(ciborium::de::Error::Semantic(
-                None,
-                "expected SIG1_TAG:array payload as bytes".to_owned(),
-            ));
-        }
-    };
-    let signature = match &arr[3] {
-        ciborium::value::Value::Bytes(v) => v.clone(),
-        _ => {
-            return Err(ciborium::de::Error::Semantic(
-                None,
-                "expected SIG1_TAG:array signature as bytes".to_owned(),
-            ));
-        }
-    };
-    Ok((header, payload, signature))
 }
 
 #[cfg(test)]

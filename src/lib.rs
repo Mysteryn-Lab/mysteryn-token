@@ -92,6 +92,9 @@ pub mod verifier;
 pub use mysteryn_crypto as crypto;
 pub use mysteryn_crypto::result;
 
+#[macro_use(concat_string)]
+extern crate concat_string;
+
 #[cfg(all(target_family = "wasm", target_os = "unknown"))]
 pub mod js;
 

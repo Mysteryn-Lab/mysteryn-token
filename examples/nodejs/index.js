@@ -22,9 +22,9 @@ if (public2did(key) !== did) {
   throw new Error("DID decoding error")
 }
 
-const recipientKey = "pub_xahgjw6qgrwp6kyqgpyqd9vnxsydeaqkkf6p6tupkq2euhjrsqfgvwsgv35zywdnze59akkg2ffxdsk8qaqq"
+const recipientKey = "pub_xahgjw6qgrwp6kyqgpyr9pgcew6cmv6qpncr8gd2a2r79mgz37ee0x056u94lx8hnhzgue56gqzvavws4r"
 const recipient = public2did(recipientKey)
-if (recipient !== "did:key:pub_xahgjw6qgrwp6kyqgpyqd9vnxsydeaqkkf6p6tupkq2euhjrsqfgvwsgv35zywdnze59akkg2ffxdsk8qaqq") {
+if (recipient !== "did:key:pub_xahgjw6qgrwp6kyqgpyr9pgcew6cmv6qpncr8gd2a2r79mgz37ee0x056u94lx8hnhzgue56gqzvavws4r") {
   throw new Error("DID decoding error")
 }
 

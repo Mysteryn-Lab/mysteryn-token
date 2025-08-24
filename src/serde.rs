@@ -70,12 +70,17 @@ pub trait Base64Encode: DagJson + DagCbor {
     }
 
     fn cwt_cbor_base64_encode(&self) -> Result<String> {
-        Ok("u".to_string()
-            + &base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(self.to_dag_cbor()?))
+        Ok(concat_string!(
+            "u",
+            &base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(self.to_dag_cbor()?)
+        ))
     }
 
     fn cwt_cbor_base58_encode(&self) -> Result<String> {
-        Ok("z".to_string() + &bs58::encode(self.to_dag_cbor()?).into_string())
+        Ok(concat_string!(
+            "z",
+            &bs58::encode(self.to_dag_cbor()?).into_string()
+        ))
     }
 }
 

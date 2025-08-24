@@ -1,9 +1,12 @@
 **/target/
 *.ffs_db
-
 **/.DS_Store
-.direnv
+
+.vscode
+.continue
 
 dist
-bundle
-lib
+pkg
+
+*.pending-snap
+*.new

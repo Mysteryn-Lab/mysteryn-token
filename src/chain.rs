@@ -52,7 +52,7 @@ pub struct ProofChain<KF: KeyFactory> {
 }
 
 impl<KF: KeyFactory> ProofChain<KF> {
-    /// Instantiate a [ProofChain] from a [Token], given a [JwtStore] and [DidParser]
+    /// Instantiate a [`ProofChain`] from a [Token], given a [`JwtStore`] and [`DidParser`]
     #[cfg_attr(target_arch = "wasm32", async_recursion(?Send))]
     #[cfg_attr(not(target_arch = "wasm32"), async_recursion)]
     pub async fn from_token<S>(
@@ -66,8 +66,10 @@ impl<KF: KeyFactory> ProofChain<KF> {
     {
         let token_cid = token.to_cid(Code::Blake3_256)?;
         if store.is_revoked(&token_cid).await? {
-            return Err(Error::InvalidToken(format!(
-                "Token {token_cid} was revoked"
+            return Err(Error::InvalidToken(concat_string!(
+                "Token ",
+                token_cid.to_string(),
+                " was revoked"
             )));
         }
         token.validate(my_secret_key.clone(), now_time)?;
@@ -124,8 +126,9 @@ impl<KF: KeyFactory> ProofChain<KF> {
                     }) {
                         redelegations.insert(cid);
                     } else {
-                        return Err(Error::InvalidToken(format!(
-                            "Unable to redelegate proof; CID not found {cid}"
+                        return Err(Error::InvalidToken(concat_string!(
+                            "Unable to redelegate proof; CID not found ",
+                            cid.to_string()
                         )));
                     }
                 }
@@ -186,8 +189,11 @@ impl<KF: KeyFactory> ProofChain<KF> {
                 ))
             }
         } else {
-            Err(Error::InvalidToken(format!(
-                "Invalid token link: proof audience {audience} does not match this issuer {issuer}"
+            Err(Error::InvalidToken(concat_string!(
+                "Invalid token link: proof audience ",
+                audience.to_string(),
+                " does not match this issuer ",
+                issuer.to_string()
             )))
         }
     }

@@ -14,7 +14,7 @@ use serde_json::Value;
 use std::str::FromStr;
 
 fn default_typ() -> String {
-    DELEGABLE_WEB_TOKEN_TYPE.to_string()
+    DELEGABLE_WEB_TOKEN_TYPE.to_owned()
 }
 
 fn lowercase<'de, T, D>(deserializer: D) -> std::result::Result<T, D::Error>
@@ -73,15 +73,6 @@ pub struct Payload {
 impl<KF: KeyFactory> TryFrom<&Token<KF>> for Payload {
     type Error = Error;
     fn try_from(token: &Token<KF>) -> Result<Self> {
-        let proofs = if let Some(proofs) = token.pre.as_ref() {
-            let mut string_proofs: Vec<String> = vec![];
-            for proof in proofs {
-                string_proofs.push(proof.to_string());
-            }
-            Some(string_proofs)
-        } else {
-            None
-        };
         Ok(Self {
             iss: token.iss.to_string(),
             aud: token.aud.to_string(),
@@ -89,9 +80,12 @@ impl<KF: KeyFactory> TryFrom<&Token<KF>> for Payload {
             can: token.can.clone(),
             prf: token
                 .prf
-                .clone()
-                .map(|cids| cids.iter().map(std::string::ToString::to_string).collect()),
-            pre: proofs,
+                .as_ref()
+                .map(|cids| cids.iter().map(ToString::to_string).collect()),
+            pre: token
+                .pre
+                .as_ref()
+                .map(|proofs| proofs.iter().map(ToString::to_string).collect()),
 
             exp: token.exp,
             nbf: token.nbf,
@@ -105,8 +99,8 @@ impl<KF: KeyFactory> TryFrom<&Token<KF>> for Payload {
 impl<KF: KeyFactory> From<&Token<KF>> for Header {
     fn from(token: &Token<KF>) -> Self {
         Self {
-            alg: token.sig.algorithm_name().to_string(),
-            typ: DELEGABLE_WEB_TOKEN_TYPE.to_string(),
+            alg: token.sig.algorithm_name().to_owned(),
+            typ: DELEGABLE_WEB_TOKEN_TYPE.to_owned(),
         }
     }
 }

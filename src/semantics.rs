@@ -56,7 +56,48 @@
 use crate::capability::{Action, CapabilitySemantics, Resource};
 use mysteryn_crypto::result::{Error, Result};
 use serde::{Deserialize, Serialize};
-use std::fmt::Display;
+use std::{cmp::Ordering, fmt::Display};
+
+/// Walk two path iterators (`self` and `other`) and return an ordering or `None`
+fn walk_paths<'a, I>(mut self_it: I, mut other_it: I) -> Option<Ordering>
+where
+    I: Iterator<Item = &'a str>,
+{
+    loop {
+        match (self_it.next(), other_it.next()) {
+            // Both iterators have a part → compare
+            (Some(s), Some(o)) => {
+                if s == "*" || o == "*" {
+                    continue; // wildcard matches anything
+                }
+                if s != o {
+                    return Some(Ordering::Less);
+                }
+            }
+
+            // `self` finished but `other` still has parts → self is a prefix
+            (None, Some(o)) => {
+                if o.is_empty() && other_it.next().is_none() {
+                    // it was a trailing slash after the last part - treat as equal
+                    return Some(Ordering::Equal);
+                }
+                return Some(Ordering::Greater); // e.g. "user" > "user/1"
+            }
+
+            // `other` finished but `self` still has parts → self may be a sub‑path
+            (Some(s), None) => {
+                if s.is_empty() && self_it.next().is_none() {
+                    // it was a trailing slash after the last part - treat as equal
+                    return Some(Ordering::Equal);
+                }
+                return Some(Ordering::Less);
+            }
+
+            // Both finished → paths are identical
+            (None, None) => return Some(Ordering::Equal),
+        }
+    }
+}
 
 #[derive(Eq, PartialEq, Clone, Serialize, Deserialize)]
 pub struct GeneralAction {
@@ -75,8 +116,7 @@ impl TryFrom<String> for GeneralAction {
 
 impl Display for GeneralAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let content = &self.action;
-        write!(f, "{content}")
+        write!(f, "{}", self.action)
     }
 }
 
@@ -87,49 +127,12 @@ impl PartialOrd for GeneralAction {
 }
 
 impl Ord for GeneralAction {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> Ordering {
         if self.action == other.action {
-            return std::cmp::Ordering::Equal;
+            return Ordering::Equal;
         }
 
-        let self_path_parts = self.action.split('/');
-        let mut other_path_parts = other.action.split('/');
-        let self_parts_len = self_path_parts.clone().count();
-        let other_parts_len = other_path_parts.clone().count();
-        let mut result = std::cmp::Ordering::Equal;
-
-        for part in self_path_parts {
-            match other_path_parts.next() {
-                Some(other_part) => {
-                    if part == "*" || other_part == "*" {
-                        result = std::cmp::Ordering::Equal;
-                    } else if part != other_part {
-                        return std::cmp::Ordering::Less;
-                    }
-                }
-                None => {
-                    return if part.is_empty() && self_parts_len == other_parts_len + 1 {
-                        std::cmp::Ordering::Equal
-                    } else {
-                        std::cmp::Ordering::Less
-                    };
-                }
-            }
-        }
-
-        if self_parts_len == other_parts_len {
-            return result;
-        }
-
-        if let Some(p) = other_path_parts.next() {
-            if p.is_empty() && self_parts_len + 1 == other_parts_len {
-                std::cmp::Ordering::Equal
-            } else {
-                std::cmp::Ordering::Greater
-            }
-        } else {
-            result
-        }
+        walk_paths(self.action.split('/'), other.action.split('/')).unwrap()
     }
 }
 
@@ -140,28 +143,10 @@ pub struct GeneralResource {
 
 impl Resource for GeneralResource {
     fn contains(&self, other: &Self) -> bool {
-        let self_path_parts = self.resource.split('/');
-        let mut other_path_parts = other.resource.split('/');
-
-        let parts_len = self_path_parts.clone().count();
-        let other_parts_len = other_path_parts.clone().count();
-        for part in self_path_parts {
-            match other_path_parts.next() {
-                Some(other_part) => {
-                    if part == "*" || other_part == "*" {
-                        continue;
-                    }
-                    if part != other_part {
-                        return false;
-                    }
-                }
-                None => {
-                    return part.is_empty() && parts_len == other_parts_len + 1;
-                }
-            }
-        }
-
-        true
+        matches!(
+            walk_paths(self.resource.split('/'), other.resource.split('/')),
+            Some(ord) if ord != Ordering::Less
+        )
     }
 }
 
@@ -169,14 +154,13 @@ impl TryFrom<String> for GeneralResource {
     type Error = Error;
 
     fn try_from(value: String) -> Result<Self> {
-        Ok(Self { resource: value })
+        Ok(GeneralResource { resource: value })
     }
 }
 
 impl Display for GeneralResource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let content = &self.resource;
-        write!(f, "{content}")
+        write!(f, "{}", self.resource)
     }
 }
 
@@ -256,5 +240,62 @@ mod tests {
                 result
             );
         }
+    }
+
+    #[cfg_attr(all(target_family = "wasm", target_os = "unknown"), wasm_bindgen_test)]
+    #[test]
+    fn test_walk_paths() {
+        // Equal paths
+        let a = "a/b/c";
+        let b = "a/b/c";
+        assert_eq!(
+            walk_paths(a.split('/'), b.split('/')),
+            Some(Ordering::Equal)
+        );
+
+        // Prefix path
+        let a = "a/b";
+        let b = "a/b/c";
+        assert_eq!(
+            walk_paths(a.split('/'), b.split('/')),
+            Some(Ordering::Greater)
+        );
+
+        // Sub-path
+        let a = "a/b/c";
+        let b = "a/b";
+        assert_eq!(walk_paths(a.split('/'), b.split('/')), Some(Ordering::Less));
+
+        // Wildcard
+        let a = "a/*";
+        let b = "a/b";
+        assert_eq!(
+            walk_paths(a.split('/'), b.split('/')),
+            Some(Ordering::Equal)
+        );
+
+        // Trailing slash
+        let a = "a/b/";
+        let b = "a/b";
+        assert_eq!(
+            walk_paths(a.split('/'), b.split('/')),
+            Some(Ordering::Equal)
+        );
+    }
+
+    #[cfg_attr(all(target_family = "wasm", target_os = "unknown"), wasm_bindgen_test)]
+    #[test]
+    fn test_general_action_cmp() {
+        let a = GeneralAction::try_from("a/b".to_string()).unwrap();
+        let b = GeneralAction::try_from("a/b/c".to_string()).unwrap();
+        assert_eq!(a.cmp(&b), Ordering::Greater);
+    }
+
+    #[cfg_attr(all(target_family = "wasm", target_os = "unknown"), wasm_bindgen_test)]
+    #[test]
+    fn test_general_resource_contains() {
+        let a = GeneralResource::try_from("a/b".to_string()).unwrap();
+        let b = GeneralResource::try_from("a/b/c".to_string()).unwrap();
+        assert!(a.contains(&b));
     }
 }

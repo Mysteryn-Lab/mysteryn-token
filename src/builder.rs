@@ -214,8 +214,9 @@ impl<S: DwtStore, KF: KeyFactory> TokenBuilder<S, KF> {
                 self.data.insert(key.to_owned(), value);
                 Ok(self)
             }
-            Err(error) => Err(Error::IOError(format!(
-                "Could not add data to the token: {error}"
+            Err(error) => Err(Error::IOError(concat_string!(
+                "Could not add data to the token: ",
+                error.to_string()
             ))),
         }
     }
@@ -232,8 +233,9 @@ impl<S: DwtStore, KF: KeyFactory> TokenBuilder<S, KF> {
                 match serde_json::to_value(v) {
                     Ok(v) => v,
                     Err(error) => {
-                        return Err(Error::IOError(format!(
-                            "Could not add data to the token: {error}"
+                        return Err(Error::IOError(concat_string!(
+                            "Could not add data to the token: ",
+                            error.to_string()
                         )));
                     }
                 },
@@ -458,10 +460,10 @@ impl<S: DwtStore, KF: KeyFactory> TokenBuilder<S, KF> {
 
     pub async fn build(mut self) -> Result<Token<KF>> {
         if self.capabilities.is_empty() {
-            return Err(Error::ValidationError("Missing capabilities".to_string()));
+            return Err(Error::ValidationError("Missing capabilities".to_owned()));
         }
         let Some(secret) = self.secret.as_ref() else {
-            return Err(Error::ValidationError("Missing secret".to_string()));
+            return Err(Error::ValidationError("Missing secret".to_owned()));
         };
         let issuer = if let Some(issuer) = self.issuer.as_ref() {
             issuer.clone()
@@ -469,7 +471,7 @@ impl<S: DwtStore, KF: KeyFactory> TokenBuilder<S, KF> {
             secret.get_did()?
         };
         let Some(audience) = self.audience.clone() else {
-            return Err(Error::ValidationError("Missing audience".to_string()));
+            return Err(Error::ValidationError("Missing audience".to_owned()));
         };
         if self.auto_public_key
             && (issuer.method() == "pkh" || issuer.method().starts_with("pkh:"))
@@ -516,8 +518,11 @@ impl<S: DwtStore, KF: KeyFactory> TokenBuilder<S, KF> {
             None
         };
 
-        let raw_signature =
-            secret.sign_exchange(data_to_sign.as_slice(), pk, Some(&mut attributes))?;
+        let raw_signature = secret.sign_exchange(
+            data_to_sign.as_slice(),
+            pk.as_deref(),
+            Some(&mut attributes),
+        )?;
         let signature = Multisig::<KF>::try_from(secret.signature(&raw_signature)?)?;
 
         let token = Token::new(canonical_payload, &signature);
@@ -547,10 +552,10 @@ impl<S: DwtStore, KF: KeyFactory> TokenBuilder<S, KF> {
 
     pub async fn build_deterministic(mut self, nonce: &[u8]) -> Result<Token<KF>> {
         if self.capabilities.is_empty() {
-            return Err(Error::ValidationError("Missing capabilities".to_string()));
+            return Err(Error::ValidationError("Missing capabilities".to_owned()));
         }
         let Some(secret) = self.secret.as_ref() else {
-            return Err(Error::ValidationError("Missing secret".to_string()));
+            return Err(Error::ValidationError("Missing secret".to_owned()));
         };
         let issuer = if let Some(issuer) = self.issuer.as_ref() {
             issuer.clone()
@@ -558,7 +563,7 @@ impl<S: DwtStore, KF: KeyFactory> TokenBuilder<S, KF> {
             secret.get_did()?
         };
         let Some(audience) = self.audience.clone() else {
-            return Err(Error::ValidationError("Missing audience".to_string()));
+            return Err(Error::ValidationError("Missing audience".to_owned()));
         };
         if self.auto_public_key
             && (issuer.method() == "pkh" || issuer.method().starts_with("pkh:"))
@@ -606,8 +611,11 @@ impl<S: DwtStore, KF: KeyFactory> TokenBuilder<S, KF> {
             None
         };
 
-        let raw_signature =
-            secret.sign_deterministic(data_to_sign.as_slice(), pk, Some(&mut attributes))?;
+        let raw_signature = secret.sign_deterministic(
+            data_to_sign.as_slice(),
+            pk.as_deref(),
+            Some(&mut attributes),
+        )?;
         let signature = Multisig::<KF>::try_from(secret.signature(&raw_signature)?)?;
 
         let token = Token::new(canonical_payload, &signature);
@@ -651,13 +659,12 @@ mod tests {
 
     type SecretKey = MultikeySecretKey<DefaultKeyFactory>;
 
-    // get it with "token/generate_keys()"
-    const SECRET1: &str = "secret_xahgjgqfsxwdjkxun9wspqzgzve7sze7vwm0kszkya5lurz4np9cmc8k4frds9ze0g6kzsky8pmv8qxur4vfupul38mfdgrcc";
-    //const PUBLIC1: &str = "pub_xahgjw6qgrwp6kyqgpypch74uwu40vns89yhzppvxjket5wf63tty0ar3nexl5l797l2q40ypevtls9aprku";
-    const SECRET2: &str = "secret_xahgjgqfsxwdjkxun9wspqzgr376fxzzk8jms55m6gkxa3dmtkyzmm6wfajarmv37qrf4gkqjg0g8qxur4v2gsj5skasefdpg";
-    //const PUBLIC2: &str = "pub_xahgjw6qgrwp6kyqgpyq29vthlflt6dtl5pvlrwrnllgyy5ws5a0w3xa2tt0425k9rvcwus9j33c3u0m7a2v";
-    //const SECRET3: &str = "secret_xahgjgqfsxwdjkxun9wspqzgrn0pkqhum8l2tmqkgv6hwsxz7hdhdhptwk5h603d6ylrym6hqs558qxur4vfhwa808gw29q6g";
-    //const PUBLIC3: &str = "pub_xahgjw6qgrwp6kyqgpypytg3jyl048vrnfvngk6wpz40pnhy4248gfx2guhwfczwm5mqywvctvd3e3pzlxyq";
+    const SECRET1: &str = "secret_xahgjgqfsxwdjkxun9wspqzgqgrsd09u5cxjmy5cflrpxg25xu9dss95d8dtzg6ypkvfyqyejuyc8qxur4vgmckmc6mdanv";
+    //const PUBLIC1: &str = "pub_xahgjw6qgrwp6kyqgpyrscgnh35hkuxlspvetq2vpkyxvyse3c95xqzjk4egcudvvn3pxpg7s0h0hw0r4d";
+    const SECRET2: &str = "secret_xahgjgqfsxwdjkxun9wspqzgqv4nswyr97hz886lz0082w4fwzdkdehu9n4pccfs6rhp06e2cegs8qxur4vgt8f50u23fyy";
+    //const PUBLIC2: &str = "pub_xahgjw6qgrwp6kyqgpyqjz2yeysrw28ln890d0suxpv5y8ypyp7jhgcm0hrcnrfpghswp3rsw6mjejzjy2";
+    //const SECRET3: &str = "secret_xahgjgqfsxwdjkxun9wspqzgxr6f7lyrdqvlqcafxgcafrsq7nkh2sc5kcjasw2lnhzefrtnljys8qxur4vteglcajecxh6";
+    //const PUBLIC3: &str = "pub_xahgjw6qgrwp6kyqgpypny3wzj2af4svfd3wx0sf8m03jza9n6a23vvdwx82q30fsaqgskh5zadarmjkea";
 
     #[cfg_attr(all(target_family = "wasm", target_os = "unknown"), wasm_bindgen_test)]
     #[cfg_attr(not(all(target_family = "wasm", target_os = "unknown")), tokio::test)]

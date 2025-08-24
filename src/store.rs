@@ -4,11 +4,8 @@ use cid::Cid;
 use lru::LruCache;
 use multihash_codetable::{Code, MultihashDigest};
 use mysteryn_crypto::result::{Error, Result};
-use std::{
-    collections::HashMap,
-    num::NonZeroUsize,
-    sync::{Arc, Mutex},
-};
+use parking_lot::Mutex;
+use std::{collections::HashMap, num::NonZeroUsize, sync::Arc};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub trait StoreConditionalSend: Send {}
@@ -66,7 +63,7 @@ pub trait TokenStore: StoreConditionalSendSync {
     async fn remove(&mut self, cid: &Cid) -> Result<()>;
 }
 
-/// A convenience trait built on TokenStore, adding helper methods
+/// A convenience trait built on `TokenStore`, adding helper methods
 /// for managing DWT-encoded tokens.
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
@@ -74,7 +71,10 @@ pub trait DwtStore: TokenStore + Clone {
     async fn require_token(&self, cid: &Cid) -> Result<Vec<u8>> {
         match self.read(cid).await? {
             Some(token) => Ok(token),
-            None => Err(Error::IOError(format!("No token found for CID {cid}"))),
+            None => Err(Error::IOError(concat_string!(
+                "No token found for CID ",
+                cid.to_string()
+            ))),
         }
     }
 }
@@ -107,10 +107,7 @@ impl TokenStore for MemoryStore {
             return Err(Error::ValidationError("Token is revoked".to_string()));
         }
 
-        let mut dags = self
-            .dags
-            .lock()
-            .map_err(|e| Error::IOError(format!("poisoned mutex! {e}")))?;
+        let mut dags = self.dags.lock();
 
         let Some((token, expires)) = dags.get(cid) else {
             return Ok(None);
@@ -136,10 +133,7 @@ impl TokenStore for MemoryStore {
             return Err(Error::ValidationError("Token is revoked".to_string()));
         }
 
-        let mut dags = self
-            .dags
-            .lock()
-            .map_err(|e| Error::IOError(format!("poisoned mutex! {e}")))?;
+        let mut dags = self.dags.lock();
         dags.put(*cid, (token.to_vec(), expires_at));
 
         Ok(())
@@ -150,10 +144,7 @@ impl TokenStore for MemoryStore {
             return Ok(());
         }
         let expires = {
-            let mut dags = self
-                .dags
-                .lock()
-                .map_err(|e| Error::IOError(format!("poisoned mutex! {e}")))?;
+            let mut dags = self.dags.lock();
             if let Some((_token, expires)) = dags.get(cid) {
                 *expires
             } else {
@@ -161,55 +152,37 @@ impl TokenStore for MemoryStore {
             }
         };
 
-        self.revoked
-            .lock()
-            .map_err(|e| Error::IOError(format!("poisoned mutex! {e}")))?
-            .insert(cid.clone(), expires);
+        self.revoked.lock().insert(*cid, expires);
         Ok(())
     }
 
     async fn is_revoked(&self, cid: &Cid) -> Result<bool> {
-        Ok(self
-            .revoked
-            .lock()
-            .map_err(|e| Error::IOError(format!("poisoned mutex! {e}")))?
-            .contains_key(cid))
+        Ok(self.revoked.lock().contains_key(cid))
     }
 
     async fn cleanup(&mut self) -> Result<()> {
-        let mut dags = self
-            .dags
-            .lock()
-            .map_err(|e| Error::IOError(format!("poisoned mutex! {e}")))?;
+        let mut dags = self.dags.lock();
         let mut keys_to_remove = vec![];
+        let now_ts = now();
         for (cid, item) in dags.iter() {
-            if item.1 != 0 && item.1 < now() {
-                keys_to_remove.push(cid.clone());
+            if item.1 != 0 && item.1 < now_ts {
+                keys_to_remove.push(*cid);
             }
         }
         for cid in keys_to_remove {
             dags.pop(&cid);
         }
-        self.revoked
-            .lock()
-            .map_err(|e| Error::IOError(format!("poisoned mutex! {e}")))?
-            .retain(|_, v| *v != 0 && *v < now());
+        self.revoked.lock().retain(|_, v| *v != 0 && *v < now_ts);
         Ok(())
     }
 
     async fn remove(&mut self, cid: &Cid) -> Result<()> {
         {
-            let mut dags = self
-                .dags
-                .lock()
-                .map_err(|e| Error::IOError(format!("poisoned mutex! {e}")))?;
+            let mut dags = self.dags.lock();
             dags.pop(cid);
         }
 
-        self.revoked
-            .lock()
-            .map_err(|e| Error::IOError(format!("poisoned mutex! {e}")))?
-            .insert(cid.clone(), 0);
+        self.revoked.lock().insert(*cid, 0);
         Ok(())
     }
 }

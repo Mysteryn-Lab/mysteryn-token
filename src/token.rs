@@ -151,13 +151,9 @@ impl<KF: KeyFactory> Token<KF> {
         self.verify_signature(my_secret_key)
     }
 
-    /// Validate that the signed data was signed by the stated issuer
-    pub fn verify_signature(&self, my_secret_key: Option<MultikeySecretKey<KF>>) -> Result<()> {
-        // ensure that the signed data matches the canonical representation
-        let canonical_payload = CanonicalPayload::from(self).to_dag_cbor()?;
+    fn issuer_key(&self) -> Result<MultikeyPublicKey<KF>> {
         let method = self.iss.method();
-
-        let key = if method == "pkh" || method.starts_with("pkh:") {
+        if method == "pkh" || method.starts_with("pkh:") {
             let Some(key) = self.pbk.clone() else {
                 return Err(Error::ValidationError("no public key".to_owned()));
             };
@@ -165,14 +161,25 @@ impl<KF: KeyFactory> Token<KF> {
             let id = Identity::from_public_key(&key, &self.iss.hrp());
             let iss_id = self.iss.get_identity()?;
             if iss_id != id {
-                return Err(Error::ValidationError(format!(
-                    "public key missmatch {iss_id} != {id}"
+                return Err(Error::ValidationError(concat_string!(
+                    "public key missmatch ",
+                    iss_id.to_string(),
+                    " != ",
+                    id.to_string()
                 )));
             }
-            key
+            Ok(key)
         } else {
-            MultikeyPublicKey::<KF>::try_from(&self.iss)?
-        };
+            MultikeyPublicKey::<KF>::try_from(&self.iss)
+        }
+    }
+
+    /// Validate that the signed data was signed by the stated issuer
+    pub fn verify_signature(&self, my_secret_key: Option<MultikeySecretKey<KF>>) -> Result<()> {
+        // ensure that the signed data matches the canonical representation
+        let canonical_payload = CanonicalPayload::from(self).to_dag_cbor()?;
+
+        let key = self.issuer_key()?;
 
         if key.can_verify() {
             key.verify(&canonical_payload, self.sig.raw())
@@ -206,7 +213,7 @@ impl<KF: KeyFactory> Token<KF> {
             &payload.to_dag_cbor()?,
             self.sig.as_bytes(),
         )?;
-        Ok("z".to_string() + &bs58::encode(&cwt).into_string())
+        Ok(concat_string!("z", &bs58::encode(&cwt).into_string()))
     }
 
     /// Produce a base64-encoded JWT serialization of the token suitable for
@@ -221,7 +228,7 @@ impl<KF: KeyFactory> Token<KF> {
         let signature =
             base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(self.sig.as_bytes());
 
-        Ok(format!("{header}.{payload}.{signature}"))
+        Ok(concat_string!(header, ".", payload, ".", signature))
     }
 
     /// Returns true if the token has past its expiration date
@@ -328,83 +335,14 @@ impl<KF: KeyFactory> Token<KF> {
     pub fn diag_token_string(token_str: &str) -> String {
         if token_str.contains('.') {
             // JWT token
-            let mut parts = token_str.split('.').map(|str| {
-                base64::engine::general_purpose::URL_SAFE_NO_PAD
-                    .decode(str)
-                    .map_err(|error| Error::EncodingError(error.to_string()))
-            });
-
-            let header = match parts.next() {
-                Some(h) => match h {
-                    Ok(h) => std::str::from_utf8(&h)
-                        .map(std::string::ToString::to_string)
-                        .map_err(|e| Error::EncodingError(e.to_string())),
-                    Err(e) => Err(e),
-                },
-                None => Err(Error::EncodingError(
-                    "missing header in token part".to_string(),
-                )),
-            };
-            let header = match header {
-                Ok(h) => h,
-                Err(e) => e.to_string(),
-            };
-
-            let payload = match parts.next() {
-                Some(p) => match p {
-                    Ok(p) => std::str::from_utf8(&p)
-                        .map(std::string::ToString::to_string)
-                        .map_err(|e| Error::EncodingError(e.to_string())),
-                    Err(e) => Err(e),
-                },
-                None => Err(Error::EncodingError(
-                    "missing payload in token part".to_string(),
-                )),
-            };
-            let payload = match payload {
-                Ok(p) => p,
-                Err(e) => e.to_string(),
-            };
-
-            let signature = match parts.next() {
-                Some(h) => match h {
-                    Ok(s) => match Multisig::<KF>::try_from(s.as_slice()) {
-                        Ok(s) => Ok(format!("{s:?}")),
-                        Err(e) => Err(Error::EncodingError(format!("invalid signature - {e}"))),
-                    },
-                    Err(e) => Err(e),
-                },
-                None => Err(Error::EncodingError(
-                    "missing signature in token part".to_string(),
-                )),
-            };
-            let signature = match signature {
-                Ok(s) => s,
-                Err(e) => e.to_string(),
-            };
-
-            let (token, cid) = match Token::<KF>::from_str(token_str) {
-                Ok(token) => (
-                    format!("{token:?}"),
-                    if let Ok(cid) = token.to_cid(Code::Blake3_256) {
-                        cid.to_string()
-                    } else {
-                        String::new()
-                    },
-                ),
-                Err(e) => (e.to_string(), String::new()),
-            };
-
-            format!(
-                "====================================\n---- JWT token: {token_str}\n---- Header:    {header}\n---- Payload:   {payload}\n---- Signature: {signature}\n---- CID      : {cid}\n---- Canonical: {token}\n===================================="
-            )
+            Self::diag_jwt(token_str)
         } else {
             // DWT or CWT token
-            let mut token_type = "DWT".to_string();
+            let mut token_type = "DWT";
             let payload = match multibase::decode(token_str) {
                 Ok(token_bytes) => {
                     if crate::cwt::is_cwt(&token_bytes) {
-                        token_type = "CWT".to_string();
+                        token_type = "CWT";
                     }
                     cbor_diag::parse_bytes(&token_bytes)
                         .map_err(|e| Error::EncodingError(e.to_string()))
@@ -428,10 +366,105 @@ impl<KF: KeyFactory> Token<KF> {
                 Err(e) => (e.to_string(), String::new()),
             };
 
-            format!(
-                "====================================\n---- {token_type} token: {token_str}\n---- Payload:   {payload}\n---- CID      : {cid}\n---- Canonical: {token}\n===================================="
+            concat_string!(
+                "====================================\n---- ",
+                token_type,
+                " token: ",
+                token_str,
+                "\n---- Payload:   ",
+                &payload,
+                "\n---- CID      : ",
+                &cid,
+                "\n---- Canonical: ",
+                &token,
+                "\n===================================="
             )
         }
+    }
+
+    fn diag_jwt(token_str: &str) -> String {
+        let mut parts = token_str.split('.').map(|str| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(str)
+                .map_err(|error| Error::EncodingError(error.to_string()))
+        });
+
+        let header = match parts.next() {
+            Some(h) => match h {
+                Ok(h) => std::str::from_utf8(&h)
+                    .map(std::string::ToString::to_string)
+                    .map_err(|e| Error::EncodingError(e.to_string())),
+                Err(e) => Err(e),
+            },
+            None => Err(Error::EncodingError(
+                "missing header in token part".to_string(),
+            )),
+        };
+        let header = match header {
+            Ok(h) => h,
+            Err(e) => e.to_string(),
+        };
+
+        let payload = match parts.next() {
+            Some(p) => match p {
+                Ok(p) => std::str::from_utf8(&p)
+                    .map(std::string::ToString::to_string)
+                    .map_err(|e| Error::EncodingError(e.to_string())),
+                Err(e) => Err(e),
+            },
+            None => Err(Error::EncodingError(
+                "missing payload in token part".to_string(),
+            )),
+        };
+        let payload = match payload {
+            Ok(p) => p,
+            Err(e) => e.to_string(),
+        };
+
+        let signature = match parts.next() {
+            Some(h) => match h {
+                Ok(s) => match Multisig::<KF>::try_from(s.as_slice()) {
+                    Ok(s) => Ok(format!("{s:?}")),
+                    Err(e) => Err(Error::EncodingError(format!("invalid signature - {e}"))),
+                },
+                Err(e) => Err(e),
+            },
+            None => Err(Error::EncodingError(
+                "missing signature in token part".to_string(),
+            )),
+        };
+        let signature = match signature {
+            Ok(s) => s,
+            Err(e) => e.to_string(),
+        };
+
+        let (token, cid) = match Token::<KF>::from_str(token_str) {
+            Ok(token) => (
+                format!("{token:?}"),
+                if let Ok(cid) = token.to_cid(Code::Blake3_256) {
+                    cid.to_string()
+                } else {
+                    String::new()
+                },
+            ),
+            Err(e) => (e.to_string(), String::new()),
+        };
+
+        concat_string!(
+            "====================================\n---- JWT token: ",
+            token_str,
+            "\n---- Header:    ",
+            &header,
+            "\n---- Payload:   ",
+            &payload,
+            "\n---- Signature: ",
+            &signature,
+            "\n---- CID      : ",
+            &cid,
+            "\n---- Canonical: ",
+            &token,
+            "\n===================================="
+        )
     }
 }
 
@@ -459,7 +492,12 @@ impl<KF: KeyFactory> FromStr for Token<KF> {
             let header = parts
                 .next()
                 .ok_or_else(|| Error::InvalidToken("missing header in token part".to_owned()))?
-                .map_err(|e| Error::InvalidToken(format!("could not read header JSON: {e}")))?;
+                .map_err(|e| {
+                    Error::InvalidToken(concat_string!(
+                        "could not read header JSON: ",
+                        e.to_string()
+                    ))
+                })?;
 
             let jwt_header = jwt::Header::from_dag_json(&header)
                 .map_err(|e| Error::InvalidToken(e.to_string()))?;
@@ -474,16 +512,21 @@ impl<KF: KeyFactory> FromStr for Token<KF> {
             if jwt_header.typ.to_lowercase() != DELEGABLE_WEB_TOKEN_TYPE
                 && jwt_header.typ.to_lowercase() != "jwt"
             {
-                return Err(Error::InvalidToken(format!(
-                    "unsupported token type: {}",
-                    jwt_header.typ
+                return Err(Error::InvalidToken(concat_string!(
+                    "unsupported token type: ",
+                    &jwt_header.typ
                 )));
             }
 
             let signed_data = parts
                 .next()
                 .ok_or_else(|| Error::InvalidToken("missing payload in token part".to_owned()))?
-                .map_err(|e| Error::InvalidToken(format!("could not read payload JSON: {e}")))?;
+                .map_err(|e| {
+                    Error::InvalidToken(concat_string!(
+                        "could not read payload JSON: ",
+                        e.to_string()
+                    ))
+                })?;
 
             let jwt_payload = jwt::Payload::from_dag_json(&signed_data)?;
             // round-trip to verify exact match
@@ -499,7 +542,9 @@ impl<KF: KeyFactory> FromStr for Token<KF> {
             let signature = parts
                 .next()
                 .ok_or_else(|| Error::InvalidToken("missing signature in token part".to_owned()))?
-                .map_err(|e| Error::InvalidToken(format!("could not read signature: {e}")))?;
+                .map_err(|e| {
+                    Error::InvalidToken(concat_string!("could not read signature: ", e.to_string()))
+                })?;
             let signature = Multisig::<KF>::try_from(signature.as_slice())?;
 
             if jwt_header.alg != signature.algorithm_name() {
@@ -554,9 +599,6 @@ impl<KF: KeyFactory> Display for Token<KF> {
 
 impl<KF: KeyFactory> PartialOrd for Token<KF> {
     fn partial_cmp(&self, other: &Self) -> std::option::Option<std::cmp::Ordering> {
-        //let a = self.encode().unwrap_or_default();
-        //let b = other.encode().unwrap_or_default();
-        //Some(a.cmp(&b))
         Some(self.cmp(other))
     }
 }
@@ -583,7 +625,7 @@ impl<KF: KeyFactory> Debug for Token<KF> {
         let cid = CidDebugWrapper(self.to_cid(Code::Blake3_256).map_err(|_| std::fmt::Error)?);
         let prf_debug = self.prf.as_ref().map(|cids| {
             cids.iter()
-                .map(|cid| CidDebugWrapper(cid.clone()))
+                .map(|cid| CidDebugWrapper(*cid))
                 .collect::<Vec<CidDebugWrapper>>()
         });
         f.debug_struct("Token")
@@ -624,13 +666,14 @@ mod tests {
     type SecretKey = MultikeySecretKey<DefaultKeyFactory>;
     type Token = MultiToken<DefaultKeyFactory>;
 
-    const SECRET1: &str = "secret_xahgjgqfsxwdjkxun9wspqzgzve7sze7vwm0kszkya5lurz4np9cmc8k4frds9ze0g6kzsky8pmv8qxur4vfupul38mfdgrcc";
-    //const PUBLIC1: &str = "pub_xahgjw6qgrwp6kyqgpypch74uwu40vns89yhzppvxjket5wf63tty0ar3nexl5l797l2q40ypevtls9aprku";
-    const SECRET2: &str = "secret_xahgjgqfsxwdjkxun9wspqzgr376fxzzk8jms55m6gkxa3dmtkyzmm6wfajarmv37qrf4gkqjg0g8qxur4v2gsj5skasefdpg";
-    //const PUBLIC2: &str = "pub_xahgjw6qgrwp6kyqgpyq29vthlflt6dtl5pvlrwrnllgyy5ws5a0w3xa2tt0425k9rvcwus9j33c3u0m7a2v";
-    const SECRET3: &str = "secret_xahgjgqfsxwdjkxun9wspqzgrn0pkqhum8l2tmqkgv6hwsxz7hdhdhptwk5h603d6ylrym6hqs558qxur4vfhwa808gw29q6g";
-    //const PUBLIC3: &str = "pub_xahgjw6qgrwp6kyqgpypytg3jyl048vrnfvngk6wpz40pnhy4248gfx2guhwfczwm5mqywvctvd3e3pzlxyq";
+    const SECRET1: &str = "secret_xahgjgqfsxwdjkxun9wspqzgqgrsd09u5cxjmy5cflrpxg25xu9dss95d8dtzg6ypkvfyqyejuyc8qxur4vgmckmc6mdanv";
+    //const PUBLIC1: &str = "pub_xahgjw6qgrwp6kyqgpyrscgnh35hkuxlspvetq2vpkyxvyse3c95xqzjk4egcudvvn3pxpg7s0h0hw0r4d";
+    const SECRET2: &str = "secret_xahgjgqfsxwdjkxun9wspqzgqv4nswyr97hz886lz0082w4fwzdkdehu9n4pccfs6rhp06e2cegs8qxur4vgt8f50u23fyy";
+    //const PUBLIC2: &str = "pub_xahgjw6qgrwp6kyqgpyqjz2yeysrw28ln890d0suxpv5y8ypyp7jhgcm0hrcnrfpghswp3rsw6mjejzjy2";
+    const SECRET3: &str = "secret_xahgjgqfsxwdjkxun9wspqzgxr6f7lyrdqvlqcafxgcafrsq7nkh2sc5kcjasw2lnhzefrtnljys8qxur4vteglcajecxh6";
+    //const PUBLIC3: &str = "pub_xahgjw6qgrwp6kyqgpypny3wzj2af4svfd3wx0sf8m03jza9n6a23vvdwx82q30fsaqgskh5zadarmjkea";
 
+    // Generate the above keys.
     #[test]
     #[ignore]
     fn generate_keys() -> Result<()> {
@@ -643,7 +686,7 @@ mod tests {
         )?;
         let public1 = secret1.public_key();
         println!("const SECRET1: &str = \"{secret1}\";");
-        println!("const PUBLIC1: &str = \"{}\";", public1);
+        println!("//const PUBLIC1: &str = \"{}\";", public1);
         let secret2 = SecretKey::new(
             multicodec_prefix::ED25519_SECRET,
             None,
@@ -653,7 +696,7 @@ mod tests {
         )?;
         let public2 = secret2.public_key();
         println!("const SECRET2: &str = \"{secret2}\";");
-        println!("const PUBLIC2: &str = \"{}\";", public2);
+        println!("//const PUBLIC2: &str = \"{}\";", public2);
         let secret3 = SecretKey::new(
             multicodec_prefix::ED25519_SECRET,
             None,
@@ -663,7 +706,7 @@ mod tests {
         )?;
         let public3 = secret3.public_key();
         println!("const SECRET3: &str = \"{secret3}\";");
-        println!("const PUBLIC3: &str = \"{}\";", public3);
+        println!("//const PUBLIC3: &str = \"{}\";", public3);
         Ok(())
     }
 
@@ -747,7 +790,7 @@ mod tests {
         println!("{}", Token::diag_token_string(&dwt));
         assert_eq!(
             dwt,
-            "z3PMDkCJyZ6a9aPz2J6313gHJdVLHomQUdTZTsHhfquWgsVBbhbvrhck1JJgijxEAwUzQHFaJjkjhqpDeWSRuHYNug1nQmfTjBjKMJqGtZdT3DfFAqDrDDAVShUTfn3SQi2BYoikKMD9Kv7HkPWhT2TdfkLUqaJMCgB4cV7CZ5D1cD8GNN3uYBrEGbsJstZiEG2okDDuPtkUZMbgKxx6JyhNhyzGRqCpqaKF78C1Ch3WnkoxixFyfiLa6EwjhkKqKDN9ZRv9mLeBHZVBXw34LK8Gia647pV9GA8g2tLXRRpbBd5fPPP8p8ZK5hsm4x5ydRcXX1GpkFAAYP4xFVx6wW52ptoAcnFzzQTvaXS8aJd4ZHyos78FLPo535NqfG1SNb8U1JAeRJdnuDZF3X6VKZRXfeT4WpekLo5241oYWEa8HuPecJ77NgnfRsvBZMXZTeDnSJN8azzRGyZeU2oQ8pqZ6ogNowuMu3TNFt1wyBeVcA8cyiJ9BtDXF63mcGLHpfKptsAcw3NGiFRoc1R2nDdXBQFyDMHSYnLxVV7h6MCU1yjP9v6JepseBTnSQGgFVUmBRbmLxiy8hHu4iFHEVhhuQan3oejcHHHnfDHM8sHDS8VLGqZiRUg7WEjLztk9AprkBb51PRvXq2sHW1grZ2tcSua4ahTJ5o4RVEaQ3ioxS7bRojgPAbrEqZqZgMECjeSj9pR89EJ4N4ccyK9jf9WtgDT3jNv4EgizZzZKKNsuyJbw1DBoz8fErRXhc9bYDAGFuLapgPUe55wXEVREjYDV99YVMoiiHhb27m9Wg3Npbw3NFdJSPSYjbrsY31io"
+            "z3PMDkCJyZ6a9aPz2J6313gHJdVLHomQUdTZTsJ5hooZuGADN7gqf38CvcPdq2yF89Lguoy1h2f4EYGcm2FADuQCCDKVdhZbfVXtM4V5yk4nZbNMnnifeS9aX4UHm6fCQ5dtLRJFy3oVxDxmUSRnNmW7hMwM9jB5YhATFBvGaiJfMeadexK5sZL9ZKVEuEWDjTXKNUiuX3Vbh6NbuwGZTrNJFYQVb7QqyPyZo8ZHsRhkPqqMBYQT1HsnNXzgCF6a7rpYpX8sYyqzRWsB9LRNQeg4e4MH4gipGVEWwroHgEpfjUnDMmp1KKLRmYDkSc22DzWLnVhoPzuQzjHEcFfHw4ugx9WbJMWCuAmF7pGJyUCpmzUBk84V5L42BBrdnYd9edt8TwY4MfjdurTrNK476wSzJN75Td1TZZiVynSkzxosY6PPoXEaVEXZKVy5BCgXfXFw963zd7q9Gd2AjaHNt2qqp9xQ9DRVRfEp4e45WyvN9SYssJD9VuKBdrWwTHPcwLk3F78n6R49KxoTK6APcdshs79t6UhFU4Rifv2wSxbAUgeVVPxvmogeGbS8SP8PkunQxg2czrXpyJyJefwqmAT4TiffgZkHyMyTLfaBeEf1kCRPCRywG2C84F91qySvtYiUeHWzomq6g3Jpz2hLE6xjZZUCKwsyV12DB78sHFZPNf8LvEjsyXXz1tHdVhcFocBaCwZq7CDAoRL9BA8NqA6SjJ1TRuKkLNXY4BG2pmp92N9XVYQsG5MUqtQLPq7jNkbQrbXptLTz6XTueemtZ9zhEPtwZLBaB9eVZ5ZX2KtBGwsH94TK7ZP1JAxdeqUs"
         );
 
         let decoded = Token::from_str(&dwt).unwrap();
@@ -806,7 +849,7 @@ mod tests {
         println!("{}", Token::diag_token_string(&jwt));
         assert_eq!(
             jwt,
-            "eyJhbGciOiJFZERTQSIsInR5cCI6ImR3dCJ9.eyJhdWQiOiJkaWQ6a2V5OnB1Yl94YWhnanc2cWdyd3A2a3lxZ3B5cTI5dnRobGZsdDZkdGw1cHZscndybmxsZ3l5NXdzNWEwdzN4YTJ0dDA0MjVrOXJ2Y3d1czlqMzNjM3UwbTdhMnYiLCJjYW4iOnsibWFpbHRvOnRlc3RAdGVzdC5jb20iOlsibXNnL3JlY2VpdmUiLCJtc2cvc2VuZCJdfSwiaXNzIjoiZGlkOmtleTpwdWJfeGFoZ2p3NnFncndwNmt5cWdweXBjaDc0dXd1NDB2bnM4OXloenBwdnhqa2V0NXdmNjN0dHkwYXIzbmV4bDVsNzk3bDJxNDB5cGV2dGxzOWFwcmt1IiwicHJlIjpbInpleXZjNW1Zcjh1VXJZVTZ3dW9QVlJOR2NpWVEzZjVadmZueVR0MUNNWkJZREpxWDlRSkhhVFE1dXZDOW1QNXhidEplVGhNQUNHS2dOZGdzeDlrZmpZeFgzNXZ6VWs4N0ZKSHR0eEh6ejJBWXJaM0JzZ05MUDZOVWY0aEEyTlk1N29ZcWlTQkZhTHBzUjV0dlBReTlYbmlSVE5YV2ZwUnlEa1ozbU5mQ0xxa2NHSno0WVBlRnU3WW1ZenFpOW1HTHRUUXNYRmlGRTJlMmFUZHB0ZVcyb0VSVnBoeXJWRkdZZlo4N3ZkWDg3cmZtWXIyNjdBblZKVnFYM2RKZTFGU0JDV01BVFJzWkg5ZjdhcmlTNjU0Y2RiY1RNcTlUaWJUWHNWWjlINFd4dW9EMnZTWExnTVpLenZZYndMMWFBWGFzZFVzZFBoZHdDa0tadkROYmRkeDRVVzhNR2t2NHF4bnRYd0ZNYlhpU2syZDloOUI4Mzg0bmNYM0Z2ekRqNDRIaTZKWDNTdktqTSJdLCJwcmYiOlsiYmFmeXI0aWN5NmZmb3drd255a2lwaDV1bWNqcTNja3N0b3V2enRlbXQzbHR2NjJiZnh0Ynozd2ZsNG0iLCJiYWZ5cjRpaGVqenNtZzJzZjd4NzRveXBqaXRuZmpyajJkcWllcnJ3N3NsNGdyNXlvbWs0NnpzaDdkdSJdfQ.uSTtAQADAEAOty-14OZqZ7oDKAxCOCj2Sqnv44owBVRk1u86ydwQbxog_NIIH6YiGUOYaObijj9RPaMrZcStFRA7BK3XD0UIAQFxCAgxMjM0NTY3OA"
+            "eyJhbGciOiJFZERTQSIsInR5cCI6ImR3dCJ9.eyJhdWQiOiJkaWQ6a2V5OnB1Yl94YWhnanc2cWdyd3A2a3lxZ3B5cWp6MnlleXNydzI4bG44OTBkMHN1eHB2NXk4eXB5cDdqaGdjbTBocmNucmZwZ2hzd3AzcnN3Nm1qZWp6ankyIiwiY2FuIjp7Im1haWx0bzp0ZXN0QHRlc3QuY29tIjpbIm1zZy9yZWNlaXZlIiwibXNnL3NlbmQiXX0sImlzcyI6ImRpZDprZXk6cHViX3hhaGdqdzZxZ3J3cDZreXFncHlyc2NnbmgzNWhrdXhsc3B2ZXRxMnZwa3l4dnlzZTNjOTV4cXpqazRlZ2N1ZHZ2bjNweHBnN3MwaDBodzByNGQiLCJwcmUiOlsiemV5dmM1bVlyOHVVcllVNnd1b1BWUk5HY2lZUTNmNVp2Zm55VHQxQ01aQllESnFYOVFKSGFUUTV1dkM5bVA1eGJ0SmVUaE1BQ0dLZ05kZ3N4OW03YURIc28xcXBKbmtmdnJ1VjkyNVJ1azZtcEZnYjJVaVNXY2VMa0pXQm5YNHdmTHptYnNlUmVrQTY2R25FM1NzRExkUlB6TEdkYWtFeVFxSGdnQnZlNGozMWt6U1N1WlVNM2hhd3RoenZCdlNpb240NkRTM1lScUMzajhHVVk1d1dKWXR3RUpFOWlqYmFnVGptVE52ZjdjVkU1Y2gzQTFESEZ4RThBakh4WkdmYWIxYUJxcUd4TkE2cjZ5RmJnMmV4Z3gzQkYxOEhYbll4SG15ZlIxVTloTHRVWm9Rd3llN3pVc1NoTmtheWYxd0E5dHFRRkJHWlJORWFrQk1zZ1Z6d0Y4U3Frck1Ld25EY214QUdlNzlvcTdEWUJWYmN0RHpCendTTUQzUGlzZkNFUVAyTTc2VTNIIl0sInByZiI6WyJiYWZ5cjRpYW9hdWoycWp6ZXNjdWk3bmdmNWh3a2FuNGlxY3FhMjN4cWJuYWFlc3lzNjdzZmxzeDQyNCIsImJhZnlyNGlhb2JzNnN6dmhsbzVwamQyanRkdWpxN3pwZGc0ZGdraHBiaXBlbG9iaWpwN3J3dGJ2dG51Il19.uSTtAQADAEDFx-I8DucFGQ5NyKZlZ3F48yYUKxQHSklGvhpbBVMieLPnnRPUIbY8AjQGUvDn6KFQYGHTphNCHYvTX3pfBNMGAQFxCAgxMjM0NTY3OA"
         );
 
         let decoded = Token::from_str(&jwt).unwrap();
@@ -864,7 +907,7 @@ mod tests {
         println!("{}", Token::diag_token_string(&cwt));
         assert_eq!(
             cwt,
-            "z3foobtamUJPGasTPpZpu8tt5ESknBZbggVutqmrsbFgsxtiqwbfhxaS7TAT2VBHkdu6Pg9arbrnb2omMrGv4eChadUkKySJrJbVzWEWJbjfBrALARL2B9WF6h1BpcRWUY87Q9XZ89hhAh5yygZaBHkMib3K1SwpswUJF38odbxWT3iUnmF2yDDukU5UTMRFLRr6CR1AuCQexXWm5VrKA5BuvFX4u2MAPW5Kt4Ez7F36fbTF7LfYJuGL4rpQn9WQXrroY6SfLEnTAvhrdts7jZt1SY1Bx4gmXY88VQZvBnSpaQDDueoWK7Zs6spjPFcSKVfrTQruqeGjM8hvPUNRu5UxTR5brddZHtH4tmDmiyjVV8hBWCViNpDpcVmFNjXbZP5vXGYWRWG48JKdxHgUXBG9kidGZnzZccCbf6rqahWo7spqJ3QtLnkiDicKSU9bWTeu5kUvAMTSWxbL1TENp4CrrXsxwQRUkXurrqz9RPn5hAy4UwS5q9LUHUt7sTzQpntdfAfyh1GeH8wCMAVD9GMV5iDNyHf8eP7ZhZnQojTdrvzQdKCXNuKfwihw1x81ZTcWuKy8q7ehpc4V51w7wQYoxzfBogs32NCeycT5n1S4wCAqUXqmFF8qUQbnTEzsMuY2PeZ9EfhouYtDrn5Qr7wwJ9PdRugQcUUgG4MVVqLsioqdBfffYr4KpCTiATeHtLimNeS24GjEpfXhhPWdGGAF33QLXBgpbKe8mMABpA8Ywyjz9jiZHNcMPVxugKzTeYDDcvaLxWQEcDc5xKy85mEymyeWmo5d2jYXn6BVKpheRiSDAMBiAXwYVxTZZFnr3Rh7GBhwG7jCeC7qPDVGPLyngkhKJba8r8qgGR4w1"
+            "z3foobtamUJPGasTPpZpu8tt5ESknBZbggVutqmrsbFgsxtiqwbfhxaS7TAT2VBHkdu6Pg9arbrnb2omMrGv4hZztP51aVZr5NFBiXnAMrSynUZrsQ3aVPZJf8V6ESiAxfWrUaLy7T3mFAS5x8MXu3MMjdfCQH6GajnJLd5vm9XoUa96R5Qu6zwgdHx6ND5Jr1wPeccqUx9RDzsHu17DAVAKk2oh3fhuTfU38BusW5Rgmu8s5xCnGN1criGstxh6q4QCYy2TVHwrhZ5FiDHaHe7QvnAbNfSubEqnDtSGeH6dHRFiVLNRi5vXfRM922KUrX3AjKYVoh1C7eGwmaS95Z7hy2CxKhWPGxu22LGDMZg4meKkFf3RPsCb4boybvAuBMpRcRZ4HptSMnh32RiiJmq4Nq3KWbWx1ZLhe4dED7YqdU6tZALhkhQ3dbiCr7b2CsveuqnBFhUqxPgYtsijnaPWqEh6X9zVQFmN7AwtegU1FCNpTpjTkmEs2JvE4MQWqDzfFRxqqy5EH7LkZwk2dCa2uayzmkT3hkqLuczi9Wi6H7SNHhY8DuoGnJBHrxHonHSiid3hNKWMQtahskahnpF89FfAHhKQCwACtGMcEkB6jJnJJwxMLz2fXzg9Q3ZT27pqRSEcPiQjJ6dar4bWG14EHiDasy2fxW1y6yhPAByJhnHd2JSPpYvDmCofPxs5xyefuZ5d7xXyYCTtEGUGDKSbCowaPPUw8Jqd8LKGDCvRHmWZr6m9Bi9bUDgtSmEW58fxVdZitCy59xUkaXyBWwUmBgV4jRprZxAHwNfiNz2KUJEBoxD98QMnA1ZK7viQgiHZLQo7MUxX2ovWNmAiGbibBJ8WiA7rSKHgpfWDm"
         );
 
         let decoded = Token::from_str(&cwt).unwrap();
@@ -922,13 +965,10 @@ mod tests {
     async fn test_did_pkh_dwt() {
         let secret_key = SecretKey::from_str(SECRET1).unwrap();
         let recipient_secret_key = SecretKey::from_str(SECRET2).unwrap();
-        let issuer = secret_key
-            .public_key()
-            .get_did_pkh("mys", Some("id"))
-            .unwrap();
+        let issuer = secret_key.public_key().get_did_pkh("mys", "id").unwrap();
         let recipient = recipient_secret_key
             .public_key()
-            .get_did_pkh("mys", Some("id"))
+            .get_did_pkh("mys", "id")
             .unwrap();
 
         let capabilities = [
@@ -951,7 +991,7 @@ mod tests {
         println!("{}", Token::diag_token_string(&dwt));
         assert_eq!(
             dwt,
-            "z6HhM8UqAKhtcZWpDSZuoxA9HhtFJeeWTDvrq6egvLAbbEkboi5sW8uemKMJTkwj2Mfz6uRuyFmX4R7LV1SYWE694TYGKrXawhukr1wwtu3JhJTP2PAGb2bpt5tiCPJCxTvqYK6jofhhXNFMiQmP4qx7A7AEs5h4rtB1a6GCtkyguh9AMQ2jcmGRSygD98TsqHHZeSf2yMveragukELExFwqDuzgeYtVsD8bgNHv2jSDQRKTCLZmyG2pSoopkvcvAHMcMhzXTkUPzXbDeuykewmGcgeau252t3Q1WdZKbWa7foHYu6MsGzBybnWzXdJqUQSswvr9cc94RcTj9dWkxLgx2mEE5x9NkEMDJ1Fhts1VA3KweySaG12StkRtqBjSC6dfAVzoyAkCXhrhsQjcCUUrK1pXAMyMJYJABaRWtrfYiu74U4tK6ZMzTHSyuzqAERjEm56UzZnzP7MwtkDZT2Gv1V"
+            "zGk5z4tZBDCKHpnW8gHi4uDpvHgHkZsoPPdG8zPHTwg7ZcVWRpySxXa6RVAHsSn9qMaj2Fh9h5Rn8aPAK79RNTGZ8bR94GqDSS3xtfDBaTURYPAV1mtNf4cNHV5EHcbW7Y5bXqWkvfSvRUKobeCfPQgX1kwrtFaGWDof55MbsCuYPEg1P7sCJEogxGvnEST8DYanwkkhz2Z3e2umHa1N1irvTFeYoCLptuybvXk2Gxqct9AYDiv8SBoVRvKmim1DNSTyWbBiNUSCAe2ygLBbhA7wn8crAoApqRsmftKnmcdfZBhQr9MyWxLekrzbrS5umG3fG7x8E5TGuw97sFXhp2KKFRFf3ha54fs217eLijMd463AnPD35QCC3dhtBRfixWdtnGDyWsD3KqxWY8vUgeeKyiHzAK2KYJt3e7DFyJ6Hz6cvUjpsEJgbyyrevwJuQgGkaa1gk5iBD8usrx1or7h"
         );
 
         let decoded = Token::from_str(&dwt).unwrap();

@@ -2,6 +2,38 @@
 
 This crate implements the Delegable Web Token (**DWT**), which is based on the principles of [Capability-based security](https://en.wikipedia.org/wiki/Capability-based_security). This type of token is used to verify and authorize user or application capabilities to perform some actions, as well it can be used to delegate capabilities to other parties.
 
+## Getting Started
+
+To start using `mysteryn-token`, add it to your `Cargo.toml`:
+
+```toml
+[dependencies]
+mysteryn-token = "0.1.0"
+```
+
+Then, you can start building and verifying tokens. Here's a quick example of how to create and verify a token:
+
+```rust
+use mysteryn_crypto::{did::Did, MultikeySecretKey, DefaultSecretKeyVariant, DefaultPublicKeyVariant};
+use mysteryn_token::TokenBuilder;
+use std::str::FromStr;
+
+pub type SecretKey = MultikeySecretKey<DefaultSecretKeyVariant, DefaultPublicKeyVariant>;
+
+let secret_key = SecretKey::from_str("secret_xahgjgqfsxwdjkxun9wspqzgzve7sze7vwm0kszkya5lurz4np9cmc8k4frds9ze0g6kzsky8pmv8qxur4vfupul38mfdgrcc")?;
+let recipient = Did::from_str("did:key:pub_xahgjw6qgrwp6kyqgpyq29vthlflt6dtl5pvlrwrnllgyy5ws5a0w3xa2tt0425k9rvcwus9j33c3u0m7a2v")?;
+let capabilities = [
+   ("mailto:test@test.com", "msg/receive"),
+   ("mailto:test@test.com", "msg/send"),
+ ];
+ 
+let builder = TokenBuilder::default()
+   .with_secret(&secret_key)
+   .for_audience(&recipient)
+   .with_capabilities(&capabilities);
+let token = builder.build().await?;
+```
+
 ## Theory
 
 Terms:
@@ -218,72 +250,74 @@ node store-example
 
 ## Use cases
 
-1. User controlled access tokens.
-   
-   The primary usage of the DWT is delegation of capabilities. Please see examples.
-   _To be continued..._
+### 1. User-Controlled Access Tokens
 
-2. The JWT replacement.
-   
-   To use the DWT as a JWT token, the issuer invokes a token with the audience (`aud`) set to the DID of a service verifying tokens (in the case issuer is the verifying service, it sets audience to it's own DID). This token cannot be delegated by users. Some user specific data, for example, "User ID", may be included in the metadata (`dat`). Optionally, capabilities (`can`) may be used to verify access rights of the user.
-   
-   ```json
-   {
-       "iss": "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog",
-       "aud": "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog",
-       "exp": 1732542921,
-       "nbf": 1529496683,
-       "nnc": "TXKhb0Rj3Aopskkd1kKNSMlixpn07BqMsQJid_3cf_o",
-       "can": {
-         "mailto:username@example.com": [
-           "msg/receive",
-           "msg/send"
-         ]
-       },
-       "dat": { "user_id": 12345 }
-   }
-   ```
+The primary use case for DWT is the delegation of capabilities. A user can receive a token from a service that grants them certain permissions. The user can then delegate a subset of those permissions to another user or service.
 
-3. Token revocation
+For example, a user might have a token that grants them read and write access to a document. They can then create a new token that delegates only read access to another user. This allows for fine-grained access control that is controlled by the user, not the service.
+
+### 2. JWT Replacement
+
+DWT can be used as a replacement for JWTs. To do this, the issuer creates a token with the audience (`aud`) set to the DID of the service that will be verifying the token. This token cannot be delegated by users.
+
+User-specific data, such as a "User ID", can be included in the metadata (`dat`). Optionally, capabilities (`can`) may be used to verify the user's access rights.
+
+```json
+{
+    "iss": "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog",
+    "aud": "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog",
+    "exp": 1732542921,
+    "nbf": 1529496683,
+    "nnc": "TXKhb0Rj3Aopskkd1kKNSMlixpn07BqMsQJid_3cf_o",
+    "can": {
+      "mailto:username@example.com": [
+        "msg/receive",
+        "msg/send"
+      ]
+    },
+    "dat": { "user_id": 12345 }
+}
+```
+
+### 3. Token Revocation
+
+Users can revoke any of their issued tokens by default (by `iss`), as well as any of their received tokens (by `aud`). Users may also revoke any token that has their token in its delegation chain.
+
+The issuer may delegate the right to revoke some of its issued tokens by the token's CID.
+
+```json
+{
+    "iss": "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog",
+    "aud": "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog",
+    "exp": 1732542921,
+    "nbf": 1529496683,
+    "nnc": "TXKhb0Rj3Aopskkd1kKNSMlixpn07BqMsQJid_3cf_o",
+    "can": {
+      "534534gfdgdfgreteterte": [
+        "revoke",
+      ]
+    },
+    "dat": { "user_id": 12345 }
+}
+```
    
-   Users can revoke any of their issued tokens by default (by `iss`), as well as any of their received tokens (by `aud`).
-   Also, users may revoke any token having their token in the delegation chain.
-   
-   The issuer may delegate the right to revoke some of it's issued tokens by token's CID.
-   
-   ```json
-   {
-       "iss": "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog",
-       "aud": "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog",
-       "exp": 1732542921,
-       "nbf": 1529496683,
-       "nnc": "TXKhb0Rj3Aopskkd1kKNSMlixpn07BqMsQJid_3cf_o",
-       "can": {
-         "534534gfdgdfgreteterte": [
-           "revoke",
-         ]
-       },
-       "dat": { "user_id": 12345 }
-   }
-   ```
-   
-    The issuer may delegate the right to revoke any of it's issued tokens by issuer's DID.
-   
-   ```json
-   {
-       "iss": "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog",
-       "aud": "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog",
-       "exp": 1732542921,
-       "nbf": 1529496683,
-       "nnc": "TXKhb0Rj3Aopskkd1kKNSMlixpn07BqMsQJid_3cf_o",
-       "can": {
-         "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog": [
-           "revoke",
-         ]
-       },
-       "dat": { "user_id": 12345 }
-   }
-   ```
+The issuer may also delegate the right to revoke any of its issued tokens by the issuer's DID.
+
+```json
+{
+    "iss": "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog",
+    "aud": "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog",
+    "exp": 1732542921,
+    "nbf": 1529496683,
+    "nnc": "TXKhb0Rj3Aopskkd1kKNSMlixpn07BqMsQJid_3cf_o",
+    "can": {
+      "did:key:z6Mkvcrr72yde85HzXzeuvEocoqc9A8B6xkGaP1YGExBPuog": [
+        "revoke",
+      ]
+    },
+    "dat": { "user_id": 12345 }
+}
+```
 
 ## Links
 

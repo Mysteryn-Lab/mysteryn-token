@@ -13,7 +13,7 @@ use tokio;
 use wasm_bindgen::prelude::wasm_bindgen;
 
 // BLS12381G1
-const SECRET: &str = "secret_xahgjgjfsxwdjkxun9wspqzgqr6nrewycalh6slwt4wwarhekzvnl5h4e4t80fz2w2l4rp27sdyy8qxur4vgh6uutvp4lpjeg";
+const SECRET: &str = "secret_xahgjgjfsxwdjkxun9wspqzgrcz99qnk5swn4730kumhav6q2n2gg5ma8pzdzxemcjcn7pv2hm2q8qxur4vgd7y52mn33mw";
 // Ed25519
 const UNSUPPORTED_SECRET: &str =
     "secrettest182qzvqqpqysqavehk5wzmqq47hfu3265k6j8kesw02r3grnequjs4my9phzgpmw4nte0nhe7gwds";
@@ -47,7 +47,7 @@ async fn main() -> Result<()> {
     println!("signed \"test data\":\nsignature {}", signature);
     assert_eq!(
         signature.to_string(),
-        "z2qusDfBWovGdzr1ZowAXUHjCAvM7HSP7bxKxmoFmArwenv8df3b3FZZzDV2Q46WMN9vMSciakhmho6dw7xBbxxVsLNb7fDy"
+        "z2qusDfBWovGdxjcJ3WA2Geq6CPMaWqWWsySogtx5bpHyEpJd1NWWDJ9FWUhSbB6zsTsQ7sMj2TCs8pnj4k7sD9dSS3SP2AB"
     );
     public_key.verify(data, &signature)?;
 

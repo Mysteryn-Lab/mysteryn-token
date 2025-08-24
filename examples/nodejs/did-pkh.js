@@ -19,9 +19,9 @@ console.log("Public key", key)
 const did = secret2did_pkh(secret, "mys", "id")
 console.log("DID", did)
 
-const recipientKey = "pub_xahgjw6qgrwp6kyqgpyqd9vnxsydeaqkkf6p6tupkq2euhjrsqfgvwsgv35zywdnze59akkg2ffxdsk8qaqq"
+const recipientKey = "pub_xahgjw6qgrwp6kyqgpyr9pgcew6cmv6qpncr8gd2a2r79mgz37ee0x056u94lx8hnhzgue56gqzvavws4r"
 const recipient = public2did_pkh(recipientKey, "mys", "id")
-if (recipient !== "did:pkh:mys:id_xarcsr2mduyma8l3wv39l5qhqae9mcf6y2f4yruyk0t328zqfxurgnqsgjukzk9njx7ups") {
+if (recipient !== "did:pkh:mys:id_xarcsrxumf4r9qe4a0g09uh6warm6may7xe5p3d6z3xa7v7elnazd3ggh4se6n0gpgju") {
   throw new Error("DID decoding error")
 }
 

@@ -1,7 +1,7 @@
 [package]
 name = "mysteryn-token"
 description = "The Delegable Web Token"
-version = "0.1.1"
+version = "0.2.0"
 keywords = ["authorization", "dwt", "capability", "security"]
 categories = [
   "authentication",
@@ -38,14 +38,16 @@ serde_bytes = "0.11"
 lru = "0.16"
 tinytemplate = "1.2"
 cbor-diag = "0.1"
-ciborium = "0.2"
+cbor4ii = { version = "1.0", features = ["use_alloc"] }
 web-time = "1.1"
-mysteryn-crypto = { version = "0.1", git = "https://github.com/Mysteryn-Lab/mysteryn-crypto.git" }
-mysteryn-keys = { version = "0.1", git = "https://github.com/Mysteryn-Lab/mysteryn-keys.git" }
+parking_lot = "0.12"
+concat-string = "1.0"
+mysteryn-crypto = { version = "0.2", git = "https://github.com/Mysteryn-Lab/mysteryn-crypto.git" }
+mysteryn-keys = { version = "0.2", git = "https://github.com/Mysteryn-Lab/mysteryn-keys.git" }
 
 [dev-dependencies]
 csv = "1.0"
-mysteryn-keys = { version = "0.1", git = "https://github.com/Mysteryn-Lab/mysteryn-keys.git", features = ["bls12381"] }
+mysteryn-keys = { version = "0.2", git = "https://github.com/Mysteryn-Lab/mysteryn-keys.git", features = ["bls12381"] }
 
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies]
 # This is needed so that rand can be included in wasm32-unknown-unknown builds.
